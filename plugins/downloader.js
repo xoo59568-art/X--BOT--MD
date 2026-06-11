@@ -131,8 +131,8 @@ async ({
         if (!match) return await m.reply(lang.NEED_URL);
         await m.react('⬇️');
         //if (!match.includes("pin.it")) return await m.reply("_Please provide a valid Pinterest URL_");
-        const result = await getJson(config.API + "/api/downloader/pin?url=" + match);
-        await m.sendFromUrl(result.data.url, { caption: result.data.created_at });
+        const data = await getJson(config.API + "/api/downloader/pin?url=" + match);
+        await m.sendFromUrl(data.url, { caption: data.title });
         await m.react('✅');
     } catch (error) {
         await m.react('❌');
@@ -179,7 +179,7 @@ Sparky({
   const play = ser.data[0];
         await m.react('⬇️');
         await m.reply(`${lang.WAIT} ${play.name} By ${play.artists}`)
-  const url = await spdl(play.link);
+  const url = await spdl(play.url);
   await m.sendMsg(m.jid , url, { mimetype: "audio/mpeg" } , "audio")
    await m.react('✅');     
     } catch (error) {
@@ -236,27 +236,27 @@ Sparky({
 // });
 
 
-Sparky({
-    name: "terabox",
-    fromMe: isPublic,
-    category: "downloader",
-    desc: "Download files from TeraBox by providing a valid URL",
-},
-async ({
-    m, client, args
-}) => {
-    try {
-        let match = args || m.quoted?.text;
-        if (!match) return await m.reply(lang.NEED_URL);
-        await m.react('⬇️');
-        const { data } = await getJson(config.API + "/api/downloader/terrabox?url=" + match);
-        await m.sendFromUrl(data.data.url, { caption: data.data.title });
-        await m.react('✅');
-    } catch (error) {
-        await m.react('❌');
-        console.error(error);
-    }
-});
+// Sparky({
+//     name: "terabox",
+//     fromMe: isPublic,
+//     category: "downloader",
+//     desc: "Download files from TeraBox by providing a valid URL",
+// },
+// async ({
+//     m, client, args
+// }) => {
+//     try {
+//         let match = args || m.quoted?.text;
+//         if (!match) return await m.reply(lang.NEED_URL);
+//         await m.react('⬇️');
+//         const { data } = await getJson(config.API + "/api/downloader/terrabox?url=" + match);
+//         await m.sendFromUrl(data.data.url, { caption: data.data.title });
+//         await m.react('✅');
+//     } catch (error) {
+//         await m.react('❌');
+//         console.error(error);
+//     }
+// });
 
 
 Sparky({
