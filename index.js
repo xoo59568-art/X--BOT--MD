@@ -333,14 +333,13 @@ if (!fs.existsSync('./lib/session')) fs.mkdirSync('./lib/session', { recursive: 
       commands.forEach(async (command) => {
         if (command.fromMe && !m.fromMe) return;
 
-        let cmdName = m.body ? m.body[0].toLowerCase() + m.body.slice(1).trim() : '';
         let args;
 
         try {
           if (command.on) {
             command.function({ m, args: m.body, client });
-          } else if (command.name && command.name.includes(cmdName)) {
-            args = m.body.replace(command.name, '$1').trim();
+          } else if (command.name && command.name.test(m.body || '')) {
+            args = (m.body || '').replace(command.name, '$1').trim();
             command.function({ m, args, client });
           }
         } catch (err) {
