@@ -42,6 +42,50 @@ const groupCache = new NodeCache({
   maxKeys: 500,
 });
 
+// ✅ Helper: key কে সবসময় string এ convert করো
+function toSafeKey(key) {
+  if (key === null || key === undefined) return 'null';
+  if (typeof key === 'string') return key;
+  if (typeof key === 'number') return String(key);
+  if (typeof key === 'object') return JSON.stringify(key);
+  return String(key);
+}
+
+// ✅ Safe cache wrapper
+const safeCache = {
+  get: (key) => {
+    try {
+      return groupCache.get(toSafeKey(key));
+    } catch (err) {
+      return undefined;
+    }
+  },
+  set: (key, value, ttl) => {
+    try {
+      if (ttl !== undefined) {
+        return groupCache.set(toSafeKey(key), value, ttl);
+      }
+      return groupCache.set(toSafeKey(key), value);
+    } catch (err) {
+      return false;
+    }
+  },
+  del: (key) => {
+    try {
+      return groupCache.del(toSafeKey(key));
+    } catch (err) {
+      return 0;
+    }
+  },
+  keys: () => {
+    try {
+      return groupCache.keys();
+    } catch (err) {
+      return [];
+    }
+  },
+};
+
 // --- Detect hosting platform ---
 let platform =
   process.env.AWS_LAMBDA_FUNCTION_NAME?.includes('AZURE_HTTP_FUNCTIONS')
@@ -80,7 +124,7 @@ let platform =
     ? 'AZURE'
     : 'VPS';
 
-// --- Web server / self-ping for free-tier hosts (Render/Replit etc.) ---
+// --- Web server / self-ping for free-tier hosts ---
 if (platform === 'REPLIT' || platform === 'RENDER') {
   let deployedUrl = '';
 
@@ -101,9 +145,9 @@ if (platform === 'REPLIT' || platform === 'RENDER') {
     }
     try {
       const response = await axios.get(deployedUrl);
-      console.log('Successfully visited ' + deployedUrl + ' - Status code: ' + response.status);
+      console.log('Successfully visited ' + deployedUrl + ' - Status: ' + response.status);
     } catch (err) {
-      console.error('Error visiting ' + deployedUrl + ':', err);
+      console.error('Error visiting ' + deployedUrl + ':', err.message);
     }
   }
 
@@ -120,7 +164,7 @@ if (!fs.existsSync('./lib/session')) fs.mkdirSync('./lib/session', { recursive: 
 
 (async function Sparky() {
   try {
-    // --- RabbitXMD Session Loader (Mega.nz only) ---
+    // --- Session Loader (Mega.nz) ---
     async function loadSession() {
       const sessionId = config.SESSION_ID;
 
@@ -129,7 +173,7 @@ if (!fs.existsSync('./lib/session')) fs.mkdirSync('./lib/session', { recursive: 
       }
 
       if (!sessionId.startsWith('RABBITXMD-')) {
-        throw new Error('Invalid SESSION_ID format. It must start with "RABBITXMD-".');
+        throw new Error('Invalid SESSION_ID format. Must start with "RABBITXMD-".');
       }
 
       const megaFileId = sessionId.replace('RABBITXMD-', '');
@@ -147,8 +191,7 @@ if (!fs.existsSync('./lib/session')) fs.mkdirSync('./lib/session', { recursive: 
       const creds = JSON.parse(credsJson);
 
       fs.writeFileSync('./lib/session/creds.json', JSON.stringify(creds, null, 2), 'utf8');
-
-      console.log('RabbitXMD session loaded from Mega.');
+      console.log('Session loaded from Mega.');
     }
 
     try {
@@ -172,30 +215,44 @@ if (!fs.existsSync('./lib/session')) fs.mkdirSync('./lib/session', { recursive: 
       version,
       logger,
       getMessage: false,
-      cachedGroupMetadata: async (jid) => groupCache.get(jid),
+      // ✅ Fix: jid কে সবসময় safe string key দিয়ে cache থেকে নাও
+      cachedGroupMetadata: async (jid) => {
+        try {
+          return safeCache.get(jid);
+        } catch (err) {
+          return undefined;
+        }
+      },
     });
 
     const ownerJid =
       (config.SUDO !== '' ? config.SUDO.split(',')[0] : client.user.id.split(':')[0]) +
       '@s.whatsapp.net';
 
-    // --- Periodic "update available" checker (runs once then clears) ---
+    // ✅ Fix: array key এর বদলে string key ব্যবহার করো
     const updateCheckInterval = setInterval(async () => {
-      await groupCache.keys(); // (kept from original; placeholder timer tick)
-      const updates = await groupCache.get(['LOGS', 'X', 'BOT']); // placeholder; replace with real update source
-      let msg = '*_New updates available for RabbitXMD_*\n\n';
-      updates?.total?.forEach?.((item, idx) => {
-        msg += '```' + (idx + 1 + '. ' + item.name + '\n') + '```';
-      });
-      if (updates?.total > 0) {
-        await client.sendMessage(ownerJid, {
-          text:
-            msg +
-            ("\n_Type '" +
+      try {
+        // ✅ string key দিয়ে get করো, array দিয়ে নয়
+        const updates = safeCache.get('BOT_UPDATES');
+
+        if (!updates || !updates.total || updates.total <= 0) return;
+
+        let msg = '*_New updates available for RabbitXMD_*\n\n';
+        if (Array.isArray(updates.total)) {
+          updates.total.forEach((item, idx) => {
+            msg += '```' + (idx + 1) + '. ' + item.name + '\n```';
+          });
+          await client.sendMessage(ownerJid, {
+            text:
+              msg +
+              "\n_Type '" +
               (config.PREFIX === 'false' ? '' : config.PREFIX) +
-              "update now' to update the bot._"),
-        });
-        clearInterval(updateCheckInterval);
+              "update now' to update the bot._",
+          });
+          clearInterval(updateCheckInterval);
+        }
+      } catch (err) {
+        // interval এ error হলে চুপ থাকো
       }
     }, 60000);
 
@@ -204,7 +261,7 @@ if (!fs.existsSync('./lib/session')) fs.mkdirSync('./lib/session', { recursive: 
       await config.DATABASE.sync;
       console.log('Database synced.');
     } catch (err) {
-      console.error('Error while syncing database:', err);
+      console.error('Error while syncing database:', err.message);
     }
 
     // --- Load external plugins ---
@@ -214,16 +271,16 @@ if (!fs.existsSync('./lib/session')) fs.mkdirSync('./lib/session', { recursive: 
         plugins.map(async (plugin) => {
           if (!fs.existsSync('./plugins/' + plugin.dataValues.name + '.js')) {
             const pluginResp = await axios.get(plugin.dataValues.url);
-            if (pluginResp.status == 200) {
-              console.log('Installing external plugins...');
+            if (pluginResp.status === 200) {
+              console.log('Installing external plugin:', plugin.dataValues.name);
               fs.writeFileSync('./plugins/' + plugin.dataValues.name + '.js', pluginResp.data);
               require('./plugins/' + plugin.dataValues.name + '.js');
-              console.log('External plugins loaded successfully.');
+              console.log('External plugin loaded:', plugin.dataValues.name);
             }
           }
         });
       } catch (err) {
-        console.log(err);
+        console.error('External plugin load error:', err.message);
       }
     }
 
@@ -233,18 +290,24 @@ if (!fs.existsSync('./lib/session')) fs.mkdirSync('./lib/session', { recursive: 
         console.log('Connecting...');
       } else if (connection === 'open') {
         await loadExternalPlugins();
-        console.log('Session connected and session files saved.');
+        console.log('Session connected!');
 
         try {
-          const channelJid = 'Whatsapp Channel'; // placeholder original obfuscated value
+          const channelJid = 'Whatsapp Channel';
           await client.groupAcceptInvite(channelJid);
         } catch (err) {
-          console.error('❌ Error while joining group or following channel:', err.message);
+          // channel join optional, error হলে skip
         }
 
         fs.readdirSync('./plugins')
           .filter((file) => path.extname(file) === '.js')
-          .forEach((file) => require('./plugins/' + file));
+          .forEach((file) => {
+            try {
+              require('./plugins/' + file);
+            } catch (err) {
+              console.error('Plugin load error:', file, err.message);
+            }
+          });
 
         const startMsg =
           '*RABBITXMD STARTED!*\n\n_Mode: ' +
@@ -283,15 +346,15 @@ if (!fs.existsSync('./lib/session')) fs.mkdirSync('./lib/session', { recursive: 
           (config.SUDO !== '' ? config.SUDO.split(',')[0] : client.user.id.split(':')[0]) +
           '@s.whatsapp.net';
 
-        if (config.START_MSG)
-          return await client.sendMessage(
+        if (config.START_MSG) {
+          await client.sendMessage(
             startMsgJid,
             {
               text: startMsg,
               contextInfo: {
                 externalAdReply: {
-                  title: 'RABBITXMD UPDATES ',
-                  body: 'RABBITXMD UPDATES ',
+                  title: 'RABBITXMD UPDATES',
+                  body: 'RABBITXMD UPDATES',
                   sourceUrl: 'https://whatsapp.com/channel/0029Va9ZOf36rsR1Ym7O2x00',
                   mediaUrl: 'https://whatsapp.com/channel/0029Va9ZOf36rsR1Ym7O2x00',
                   mediaType: 1,
@@ -303,10 +366,11 @@ if (!fs.existsSync('./lib/session')) fs.mkdirSync('./lib/session', { recursive: 
             },
             { quoted: false }
           );
+        }
       } else if (connection === 'close') {
         const reasonCode = new Boom(lastDisconnect?.error)?.output?.statusCode;
         if (reasonCode === DisconnectReason.connectionReplaced) {
-          console.log('Connection replaced. Logout current session first.');
+          console.log('Connection replaced. Logging out...');
           await client.logout();
         } else {
           console.log('Reconnecting...');
@@ -316,13 +380,40 @@ if (!fs.existsSync('./lib/session')) fs.mkdirSync('./lib/session', { recursive: 
       }
     });
 
+    // ✅ Fix: group metadata cache করার সময় safe key ব্যবহার করো
+    client.ev.on('groups.update', async (updates) => {
+      for (const update of updates) {
+        try {
+          if (update.id) {
+            safeCache.set(update.id, update);
+          }
+        } catch (err) {
+          // cache error হলে skip
+        }
+      }
+    });
+
+    // ✅ Fix: group participants update এ safe cache
+    client.ev.on('group-participants.update', async ({ id, participants, action }) => {
+      try {
+        if (id) {
+          const cached = safeCache.get(id);
+          if (cached) {
+            safeCache.set(id, { ...cached, participants });
+          }
+        }
+      } catch (err) {
+        // cache error হলে skip
+      }
+    });
+
     // --- Incoming messages ---
     client.ev.on('messages.upsert', async (messageUpdate) => {
       let m;
       try {
         m = await serialize(JSON.parse(JSON.stringify(messageUpdate.messages[0])), client);
       } catch (err) {
-        console.error('Error serializing message:', err);
+        console.error('Error serializing message:', err.message);
         return;
       }
 
@@ -334,7 +425,6 @@ if (!fs.existsSync('./lib/session')) fs.mkdirSync('./lib/session', { recursive: 
         if (command.fromMe && !m.fromMe) return;
 
         let args;
-
         try {
           if (command.on) {
             command.function({ m, args: m.body, client });
@@ -343,12 +433,12 @@ if (!fs.existsSync('./lib/session')) fs.mkdirSync('./lib/session', { recursive: 
             command.function({ m, args, client });
           }
         } catch (err) {
-          console.log(err);
+          console.error('Command error:', err.message);
         }
       });
     });
 
-    // --- Save credentials on update ---
+    // --- Save credentials ---
     client.ev.on('creds.update', saveCreds);
 
     // --- Call automation ---
@@ -357,6 +447,7 @@ if (!fs.existsSync('./lib/session')) fs.mkdirSync('./lib/session', { recursive: 
         await callAutomation(client, call);
       }
     });
+
   } catch (err) {
     console.error('Error:', err.message);
     await sleep(3000);
