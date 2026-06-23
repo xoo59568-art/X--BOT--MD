@@ -14,6 +14,7 @@ const pinoModule = require('pino');
 const logger = pinoModule({ level: 'silent' });
 const fs = require('fs');
 const path = require('path');
+const mega = require('megajs');
 
 const {
   serialize,
@@ -119,19 +120,41 @@ if (!fs.existsSync('./lib/session')) fs.mkdirSync('./lib/session', { recursive: 
 
 (async function Sparky() {
   try {
-    // --- Restore session from gist (if SESSION_ID set) ---
+    // --- RabbitXMD Session Loader (Mega.nz only) ---
+    async function loadSession() {
+      const sessionId = config.SESSION_ID;
+
+      if (!sessionId) {
+        throw new Error('SESSION_ID is not set in config.');
+      }
+
+      if (!sessionId.startsWith('RABBITXMD-')) {
+        throw new Error('Invalid SESSION_ID format. It must start with "RABBITXMD-".');
+      }
+
+      const megaFileId = sessionId.replace('RABBITXMD-', '');
+      const megaUrl = 'https://mega.nz/file/' + megaFileId;
+
+      const megaFile = mega.File.fromURL(megaUrl);
+      const downloadStream = megaFile.download();
+
+      const chunks = [];
+      for await (const chunk of downloadStream) {
+        chunks.push(chunk);
+      }
+
+      const credsJson = Buffer.concat(chunks).toString('utf8');
+      const creds = JSON.parse(credsJson);
+
+      fs.writeFileSync('./lib/session/creds.json', JSON.stringify(creds, null, 2), 'utf8');
+
+      console.log('RabbitXMD session loaded from Mega.');
+    }
+
     try {
-      if (!config.SESSION_ID) throw new Error('Session ID missing');
-      const gistResp = await axios.get(
-        'https://gist.github.com/ESWIN-SPERKY/' + config.SESSION_ID.split(':')[1] + '/raw'
-      );
-      Object.keys(gistResp.data).forEach((fileName) => {
-        fs.writeFileSync('./lib/session/' + fileName, gistResp.data[fileName], 'utf8');
-      });
-      console.log('session created successfully');
-      console.log('Database synced.');
+      await loadSession();
     } catch (err) {
-      console.error('Error:', err.message);
+      console.error('Session load failed:', err.message);
     }
 
     const { state, saveCreds } = await useMultiFileAuthState('./lib/session');
@@ -160,7 +183,7 @@ if (!fs.existsSync('./lib/session')) fs.mkdirSync('./lib/session', { recursive: 
     const updateCheckInterval = setInterval(async () => {
       await groupCache.keys(); // (kept from original; placeholder timer tick)
       const updates = await groupCache.get(['LOGS', 'X', 'BOT']); // placeholder; replace with real update source
-      let msg = '*_New updates available for X-BOT-MD_*\n\n';
+      let msg = '*_New updates available for RabbitXMD_*\n\n';
       updates?.total?.forEach?.((item, idx) => {
         msg += '```' + (idx + 1 + '. ' + item.name + '\n') + '```';
       });
@@ -224,7 +247,7 @@ if (!fs.existsSync('./lib/session')) fs.mkdirSync('./lib/session', { recursive: 
           .forEach((file) => require('./plugins/' + file));
 
         const startMsg =
-          '*X BOT MD STARTED!*\n\n_Mode: ' +
+          '*RABBITXMD STARTED!*\n\n_Mode: ' +
           config.WORK_TYPE +
           '_\n_Prefix: ' +
           config.PREFIX +
@@ -267,8 +290,8 @@ if (!fs.existsSync('./lib/session')) fs.mkdirSync('./lib/session', { recursive: 
               text: startMsg,
               contextInfo: {
                 externalAdReply: {
-                  title: 'X BOT MD UPDATES ',
-                  body: 'X BOT MD UPDATES ',
+                  title: 'RABBITXMD UPDATES ',
+                  body: 'RABBITXMD UPDATES ',
                   sourceUrl: 'https://whatsapp.com/channel/0029Va9ZOf36rsR1Ym7O2x00',
                   mediaUrl: 'https://whatsapp.com/channel/0029Va9ZOf36rsR1Ym7O2x00',
                   mediaType: 1,
