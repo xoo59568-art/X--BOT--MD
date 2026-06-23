@@ -14,7 +14,6 @@ const pinoModule = require('pino');
 const logger = pinoModule({ level: 'silent' });
 const fs = require('fs');
 const path = require('path');
-const mega = require('megajs');
 
 const {
   serialize,
@@ -120,38 +119,17 @@ if (!fs.existsSync('./lib/session')) fs.mkdirSync('./lib/session', { recursive: 
 
 (async function Sparky() {
   try {
-    // --- Restore session (Mega.nz or Gist, based on SESSION_ID prefix) ---
+    // --- Restore session from gist (if SESSION_ID set) ---
     try {
       if (!config.SESSION_ID) throw new Error('Session ID missing');
-
-      if (config.SESSION_ID.startsWith('RABBITXMD-')) {
-        const megaUrl = 'https://mega.nz/file/' + config.SESSION_ID.replace('RABBITXMD-', '');
-
-        const file = mega.File.fromURL(megaUrl);
-
-        let data = '';
-        const stream = file.download();
-
-        for await (const chunk of stream) {
-          data += chunk.toString();
-        }
-
-        const creds = JSON.parse(data);
-
-        fs.writeFileSync('./lib/session/creds.json', JSON.stringify(creds, null, 2), 'utf8');
-
-        console.log('RabbitXMD session loaded.');
-      } else {
-        const gistResp = await axios.get(
-          'https://gist.github.com/RABBITXMD/' + config.SESSION_ID.split(':')[1] + '/raw'
-        );
-
-        Object.keys(gistResp.data).forEach((fileName) => {
-          fs.writeFileSync('./lib/session/' + fileName, gistResp.data[fileName], 'utf8');
-        });
-
-        console.log('RabbitXMD session files saved.');
-      }
+      const gistResp = await axios.get(
+        'https://gist.github.com/ESWIN-SPERKY/' + config.SESSION_ID.split(':')[1] + '/raw'
+      );
+      Object.keys(gistResp.data).forEach((fileName) => {
+        fs.writeFileSync('./lib/session/' + fileName, gistResp.data[fileName], 'utf8');
+      });
+      console.log('session created successfully');
+      console.log('Database synced.');
     } catch (err) {
       console.error('Error:', err.message);
     }
